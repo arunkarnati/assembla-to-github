@@ -1,4 +1,28 @@
-.idea/
-.idea_modules/
+# Credentials #
+###############
+.env
+
+# App Files #
+############
+*.cache
+bin/
+build/
+cache/
+logs/
+tmp/
+vendor/
 log.txt
 dump.json
+
+# Deployment/IDE Tools #
+############
+autoload.php
+composer.lock
+composer.phar
+phpunit.xml
+.buildpath
+*.iml
+.idea/
+.idea_modules/
+.project
+.settings

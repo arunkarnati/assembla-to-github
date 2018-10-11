@@ -1,0 +1,30 @@
+{
+  "name": "assembla-to-github",
+  "description": "Service that migrates tickets from Assembla to GitHub",
+  "type": "library",
+  "license": "Apache-2.0",
+  "require": {
+    "php": ">=7.1",
+    "guzzlehttp/guzzle": "~6.0"
+  },
+  "require-dev": {
+    "psr/log": "^1",
+    "symfony/dotenv": "^4.1",
+    "php-http/guzzle6-adapter": "^1.0",
+    "knplabs/github-api": "^2.10.1",
+    "phpunit/phpunit": "^6.4"
+  },
+  "autoload": {
+    "psr-4": {
+      "Migrator\\": "src"
+    }
+  },
+  "autoload-dev": {
+    "psr-4": {
+      "Tests\\": "tests"
+    }
+  },
+  "scripts": {
+    "test": "vendor/bin/phpunit"
+  }
+}
