@@ -21,4 +21,9 @@ class ExecuteTest extends TestCase
     {
         print_r($this->execute->getRepos());
     }
+
+    public function testReadFile()
+    {
+        $this->execute->readFile();
+    }
 }
