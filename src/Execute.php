@@ -4,19 +4,23 @@ declare(strict_types=1);
 namespace Migrator;
 
 use Github\Client;
+use Github\Exception\MissingArgumentException;
 use Symfony\Component\Dotenv\Dotenv;
 
 class Execute
 {
+    const MILESTONE_MAP = array(
+        "3820293"  => 1,
+        "12345924" => 2,
+        "10195553" => 3,
+        "12379264" => 4,
+    );
     /** @var Client */
     public $client;
-
     /** @var array */
     public $assemblaTicketFields;
-
-    const MILESTONE_BACKLOG = 1;
-    const MILESTONE_SEO = 2;
-    const MILESTONE_TECH_BACKLOG = 3;
+    /** @var array */
+    public $tickets = [];
 
     /**
      * GitHub authentication is done in the constructor.
@@ -34,37 +38,61 @@ class Execute
     public function getAssemblaTicketFields()
     {
         if (!isset($this->assemblaTicketFields)) {
-            $data = file(__DIR__.'/../ticket_fields.txt');
-            $this->assemblaTicketFields = $data;
+            $this->readDumpFile();
         }
+
         return $this->assemblaTicketFields;
     }
 
-    public function readFile()
+    public function readDumpFile()
     {
-        $data = file(__DIR__.'/../dump.json');
-
-    }
-
-    public function getGitHubMileStoneId(int $milestone)
-    {
-        switch ($milestone) {
-            case '1':
-                $id = 1;
-                break;
-            default:
-                $id = 0;
+        $arr = file(__DIR__.'/../dump.json');
+        foreach ($arr as $value) {
+            $parts = explode(',', $value, 2);
+            switch ($parts[0]) {
+                case 'tickets:fields':
+                    $this->assemblaTicketFields = json_decode(trim($parts[1]));
+                    break;
+                case 'tickets':
+                    $data = explode('tickets, ', trim($parts[1]));
+                    foreach ($data as $item) {
+                        $ticket = array_combine($this->assemblaTicketFields, json_decode($item));
+                        if (in_array($ticket['milestone_id'], array_keys(Execute::MILESTONE_MAP))) {
+                            $this->tickets[] = $ticket;
+                        }
+                    }
+                    break;
+            }
         }
-        return $id;
     }
 
-    public function convertTicketDataToArray($ticket)
+    public function createIssuesOnGitHub()
     {
+        if (!$this->getTickets()) {
+            $this->readDumpFile();
+        }
 
+        $tickets = $this->getTickets();
+
+        foreach ($tickets as $ticket) {
+            try {
+                $this->client->issues()->create("arunkarnati", "assembla-to-github", [
+                    "title"     => $ticket['summary'],
+                    "body"      => $ticket['description'],
+                    "milestone" => Execute::MILESTONE_MAP[$ticket['milestone_id']],
+                ]);
+            } catch (MissingArgumentException $e) {
+                return $e->getMessage();
+            }
+        }
     }
 
-    public function getRepos()
+    public function getTickets()
     {
-        return $this->client->currentUser()->repositories();
+        if (!isset($this->tickets)) {
+            $this->readDumpFile();
+        }
+
+        return $this->tickets;
     }
 }

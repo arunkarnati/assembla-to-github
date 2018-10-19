@@ -17,13 +17,18 @@ class ExecuteTest extends TestCase
         $this->execute = new Execute();
     }
 
-    public function testGetRepos()
+    public function testReadDumpFile()
     {
-        print_r($this->execute->getRepos());
+        $this->execute->readDumpFile();
     }
 
-    public function testReadFile()
+    public function testGetTickets()
     {
-        $this->execute->readFile();
+        print_r($this->execute->getTickets());
+    }
+
+    public function testCreateIssuesOnGitHub()
+    {
+        $this->execute->createIssuesOnGitHub();
     }
 }
