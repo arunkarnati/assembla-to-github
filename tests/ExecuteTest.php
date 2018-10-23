@@ -29,6 +29,6 @@ class ExecuteTest extends TestCase
 
     public function testCreateIssuesOnGitHub()
     {
-        $this->execute->createIssuesOnGitHub();
+        print_r($this->execute->createIssuesOnGitHub());
     }
 }
