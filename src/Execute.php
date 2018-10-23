@@ -13,10 +13,10 @@ class Execute
      * Map with assembla milestones as keys and github milestones as values.
      */
     const MILESTONE_MAP = array(
-        "3820293"  => 1,
-        "12345924" => 2,
-        "10195553" => 3,
-        "12379264" => 4,
+        "3820293"  => 1, // Backlog
+        "12345924" => 2, // SEO
+        "10195553" => 3, // Tech Backlog
+        "12379264" => 4, // Sprint - Biryani
     );
     const ASSEMBLA_WORKSPACE = 'crowd-fusion-tmz';
     /** @var Client */
@@ -26,9 +26,7 @@ class Execute
     /** @var array */
     public $assemblaCommentFields;
     /** @var array */
-    public $tickets = [];
-    /** @var array - assembla ticket ID is key, GitHub issue is value */
-    public $ticketMap = [];
+    public $tickets;
 
     /**
      * GitHub authentication is done in the constructor.
@@ -90,8 +88,6 @@ class Execute
                     break;
             }
         }
-        print_r($this->tickets);
-        exit;
     }
 
     /**
@@ -109,7 +105,7 @@ class Execute
         $response = '';
 
         foreach ($tickets as $ticket) {
-            $description = $ticket['description'].' Assembla Ticket Link: https://app.assembla.com/spaces/'.Execute::ASSEMBLA_WORKSPACE.'/tickets/realtime_cardwall?ticket='.$ticket['number'];
+            $description = $ticket['description'].'<br /><br />Assembla Ticket Link: https://app.assembla.com/spaces/'.Execute::ASSEMBLA_WORKSPACE.'/tickets/realtime_cardwall?ticket='.$ticket['number'];
 
             try {
                 $response = $this->client->issues()->create(getenv('GH_USERNAME'), getenv('GH_REPO'), [
@@ -117,7 +113,12 @@ class Execute
                     "body"      => $description,
                     "milestone" => Execute::MILESTONE_MAP[$ticket['milestone_id']],
                 ]);
-                $this->ticketMap[$ticket['id']] = $response['number'];
+
+                if (isset($ticket['comments']) && isset($response['number'])) {
+                    foreach ($ticket['comments'] as $comment) {
+                        $this->addCommentToIssue($response['number'], $comment['comment']);
+                    }
+                }
             } catch (MissingArgumentException $e) {
                 return $e->getMessage();
             }
@@ -133,5 +134,23 @@ class Execute
         }
 
         return $this->tickets;
+    }
+
+    /**
+     * @param int    $issueNumber
+     * @param string $comment
+     *
+     * @return array|string
+     */
+    public function addCommentToIssue(int $issueNumber, string $comment)
+    {
+        try {
+            $response = $this->client->issues()->comments()->create(getenv('GH_USERNAME'), getenv('GH_REPO'),
+                $issueNumber, ['body' => $comment]);
+        } catch (MissingArgumentException $e) {
+            return $e->getMessage();
+        }
+
+        return $response;
     }
 }
