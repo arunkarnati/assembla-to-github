@@ -18,7 +18,10 @@ class Execute
         "10195553" => 3, // Tech Backlog
         "12379264" => 4, // Sprint - Biryani
     );
+    /** @var string - used in the assembla ticket link */
     const ASSEMBLA_WORKSPACE = 'crowd-fusion-tmz';
+    /** @var string */
+    const DUMP_FILE_NAME = 'dump.json';
     /** @var Client */
     public $client;
     /** @var array */
@@ -60,7 +63,7 @@ class Execute
      */
     public function readDumpFile()
     {
-        $arr = file(__DIR__.'/../dump.json');
+        $arr = file(__DIR__.'/../'.Execute::DUMP_FILE_NAME);
         foreach ($arr as $value) {
             $parts = explode(',', $value, 2);
             switch ($parts[0]) {
