@@ -13,17 +13,17 @@ class Execute
      * Map with assembla milestones as keys and github milestones as values.
      */
     const MILESTONE_MAP = array(
-        "3820293"  => 1, // Backlog
-        "12345924" => 2, // SEO
-        "10195553" => 3, // Tech Backlog
+        3820293  => 1, // Backlog
+        12345924 => 2, // SEO
+        10195553 => 3, // Tech Backlog
     );
     /**
      * Map with assembla milestones as keys and github labels as values.
      */
     const MILESTONE_LABEL_MAP = array(
-        "3820293"  => 'backlog',        // Backlog
-        "12345924" => 'seo',            // SEO
-        "10195553" => 'tech-backlog',   // Tech Backlog
+        3820293  => 'backlog',        // Backlog
+        12345924 => 'seo',            // SEO
+        10195553 => 'tech-backlog',   // Tech Backlog
     );
     const PRIORITY_LABEL_MAP = array(
         1 => 'priority:high',
@@ -63,20 +63,6 @@ class Execute
         $dotEnv->load(__DIR__.'/../.env');
         $this->client->authenticate(getenv('GH_PERSONAL_ACCESS_TOKEN'), Client::AUTH_HTTP_PASSWORD);
         $this->readDumpFile();
-    }
-
-    /**
-     * Reads the ticket:fields from dump file to an array
-     *
-     * @return array
-     */
-    public function getAssemblaTicketFields()
-    {
-        if (!isset($this->assemblaTicketFields)) {
-            $this->readDumpFile();
-        }
-
-        return $this->assemblaTicketFields;
     }
 
     /**
@@ -120,25 +106,54 @@ class Execute
     }
 
     /**
+     * Reads the ticket:fields from dump file to an array
+     *
+     * @return array
+     */
+    public function getAssemblaTicketFields()
+    {
+        if (!isset($this->assemblaTicketFields)) {
+            $this->readDumpFile();
+        }
+
+        return $this->assemblaTicketFields;
+    }
+
+    /**
      * creates issues on GitHub using API and saves to ticket map
      *
-     * @return array|string - An array with issue information or an exception message
+     * @return array|null|string - An array with issue information or an exception message
+     * @throws \Exception
      */
     public function createIssuesOnGitHub()
     {
+        $milestones = $this->getAllMilestoneIds(getenv('GH_MOBILE_REPO'));
+        if (count(array_diff($milestones, Execute::MILESTONE_MAP)) !== 0) {
+            throw new \Exception('All milestones don\'t exist in GitHub');
+        }
+
         if (!isset($this->tickets)) {
             return null;
         }
 
         $response = '';
         foreach ($this->tickets as $ticket) {
-            $description = $ticket['description'].'<br /><br />Assembla Ticket Link: https://app.assembla.com/spaces/'.Execute::ASSEMBLA_WORKSPACE.'/tickets/realtime_cardwall?ticket='.$ticket['number'];
+            $ticketNumber = $ticket['number'];
+            $ticketSummary = $ticket['summary'];
+            $description = $ticket['description'].'<br /><br />Assembla Ticket Link: https://app.assembla.com/spaces/'.Execute::ASSEMBLA_WORKSPACE.'/tickets/realtime_cardwall?ticket='.$ticketNumber;
             $ticketParams = [
-                "title"     => $ticket['summary'],
+                "title"     => $ticketSummary,
                 "body"      => $description,
                 "milestone" => Execute::MILESTONE_MAP[$ticket['milestone_id']],
                 "labels"    => ['assembla', Execute::MILESTONE_LABEL_MAP[$ticket['milestone_id']]],
             ];
+            $repo = getenv('GH_REPO');
+
+            // mobile-web ticket check
+            if (($ticketNumber > 6863 && $ticketNumber < 8401) || ($ticketNumber > 8400 && strpos($ticketSummary,
+                        '[M]') !== false)) {
+                $repo = getenv('GH_MOBILE_REPO');
+            }
 
             // if the priority is set and is in the map then add an appropriate priority label to GitHub issue
             if (isset($ticket['priority']) && in_array($ticket['priority'], array_keys(Execute::PRIORITY_LABEL_MAP))) {
@@ -146,7 +161,7 @@ class Execute
             }
 
             try {
-                $response = $this->client->issues()->create(getenv('GH_USERNAME'), getenv('GH_REPO'), $ticketParams);
+                $response = $this->client->issues()->create(getenv('GH_USERNAME'), $repo, $ticketParams);
 
                 if (isset($ticket['comments']) && isset($response['number'])) {
                     foreach ($ticket['comments'] as $comment) {
@@ -161,13 +176,20 @@ class Execute
         return $response;
     }
 
-    public function getTickets()
+    /**
+     * @param string $repo
+     *
+     * @return array
+     */
+    public function getAllMilestoneIds(string $repo)
     {
-        if (!isset($this->tickets)) {
-            $this->readDumpFile();
+        $response = $this->client->repo()->milestones(getenv('GH_USERNAME'), $repo);
+        $milestones = [];
+        foreach ($response as $milestone) {
+            array_push($milestones, $milestone['number']);
         }
 
-        return $this->tickets;
+        return $milestones;
     }
 
     /**
@@ -181,10 +203,19 @@ class Execute
         try {
             $response = $this->client->issues()->comments()->create(getenv('GH_USERNAME'), getenv('GH_REPO'),
                 $issueNumber, ['body' => $comment]);
-        } catch (MissingArgumentException $e) {
+        } catch (\ErrorException $e) {
             return $e->getMessage();
         }
 
         return $response;
+    }
+
+    public function getTickets()
+    {
+        if (!isset($this->tickets)) {
+            $this->readDumpFile();
+        }
+
+        return $this->tickets;
     }
 }
