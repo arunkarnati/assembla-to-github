@@ -16,7 +16,27 @@ class Execute
         "3820293"  => 1, // Backlog
         "12345924" => 2, // SEO
         "10195553" => 3, // Tech Backlog
-        "12379264" => 4, // Sprint - Biryani
+    );
+    /**
+     * Map with assembla milestones as keys and github labels as values.
+     */
+    const MILESTONE_LABEL_MAP = array(
+        "3820293"  => 'backlog',        // Backlog
+        "12345924" => 'seo',            // SEO
+        "10195553" => 'tech-backlog',   // Tech Backlog
+    );
+    const PRIORITY_LABEL_MAP = array(
+        1 => 'priority:high',
+        2 => 'priority:high',
+        4 => 'priority:low',
+        5 => 'priority:low',
+    );
+    /** @var array - closed ticket state */
+    const ASSEMBLA_TICKET_STATE = array(
+        391028,     // invalid
+        15864473,   // fixed
+        495710,     // complete
+        24127694,   // duplicate
     );
     /** @var string - used in the assembla ticket link */
     const ASSEMBLA_WORKSPACE = 'crowd-fusion-tmz';
@@ -42,6 +62,7 @@ class Execute
         $dotEnv = new Dotenv();
         $dotEnv->load(__DIR__.'/../.env');
         $this->client->authenticate(getenv('GH_PERSONAL_ACCESS_TOKEN'), Client::AUTH_HTTP_PASSWORD);
+        $this->readDumpFile();
     }
 
     /**
@@ -76,14 +97,19 @@ class Execute
                 case 'tickets':
                     $data = explode('tickets, ', trim($parts[1]));
                     $ticket = array_combine($this->assemblaTicketFields, json_decode($data[0]));
-                    if (in_array($ticket['milestone_id'], array_keys(Execute::MILESTONE_MAP))) {
+
+                    // tickets with milestones from the map and without closed state
+                    if (in_array($ticket['milestone_id'],
+                            array_keys(Execute::MILESTONE_MAP)) && !in_array($ticket['ticket_status_id'],
+                            Execute::ASSEMBLA_TICKET_STATE)) {
                         $this->tickets[$ticket['id']] = $ticket;
                     }
                     break;
                 case 'ticket_comments':
                     $data = explode('ticket_comments, ', trim($parts[1]));
                     $comment = array_combine($this->assemblaCommentFields, json_decode($data[0]));
-                    // only add comments of tickets in the milestone set and that is not a code commit comment
+
+                    // only add comments of tickets in the milestone map and is not a code commit comment
                     if ($comment['comment'] !== '' && strpos($comment['comment'],
                             '[[r:3:') === false && isset($this->tickets[$comment['ticket_id']])) {
                         $this->tickets[$comment['ticket_id']]['comments'][] = $comment;
@@ -100,22 +126,27 @@ class Execute
      */
     public function createIssuesOnGitHub()
     {
-        if (!$this->getTickets()) {
-            $this->readDumpFile();
+        if (!isset($this->tickets)) {
+            return null;
         }
 
-        $tickets = $this->getTickets();
         $response = '';
-
-        foreach ($tickets as $ticket) {
+        foreach ($this->tickets as $ticket) {
             $description = $ticket['description'].'<br /><br />Assembla Ticket Link: https://app.assembla.com/spaces/'.Execute::ASSEMBLA_WORKSPACE.'/tickets/realtime_cardwall?ticket='.$ticket['number'];
+            $ticketParams = [
+                "title"     => $ticket['summary'],
+                "body"      => $description,
+                "milestone" => Execute::MILESTONE_MAP[$ticket['milestone_id']],
+                "labels"    => ['assembla', Execute::MILESTONE_LABEL_MAP[$ticket['milestone_id']]],
+            ];
+
+            // if the priority is set and is in the map then add an appropriate priority label to GitHub issue
+            if (isset($ticket['priority']) && in_array($ticket['priority'], array_keys(Execute::PRIORITY_LABEL_MAP))) {
+                array_push($ticketParams['labels'], Execute::PRIORITY_LABEL_MAP[$ticket['priority']]);
+            }
 
             try {
-                $response = $this->client->issues()->create(getenv('GH_USERNAME'), getenv('GH_REPO'), [
-                    "title"     => $ticket['summary'],
-                    "body"      => $description,
-                    "milestone" => Execute::MILESTONE_MAP[$ticket['milestone_id']],
-                ]);
+                $response = $this->client->issues()->create(getenv('GH_USERNAME'), getenv('GH_REPO'), $ticketParams);
 
                 if (isset($ticket['comments']) && isset($response['number'])) {
                     foreach ($ticket['comments'] as $comment) {
