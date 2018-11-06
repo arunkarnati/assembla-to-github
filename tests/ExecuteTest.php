@@ -19,7 +19,12 @@ class ExecuteTest extends TestCase
 
     public function testReadDumpFile()
     {
-        $this->execute->readDumpFile();
+        print_r($this->execute->readDumpFile());
+    }
+
+    public function testGetMilestones()
+    {
+        print_r($this->execute->getMilestones());
     }
 
     public function testGetTickets()

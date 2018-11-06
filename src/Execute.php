@@ -10,46 +10,66 @@ use Symfony\Component\Dotenv\Dotenv;
 class Execute
 {
     /**
-     * Map with assembla milestones as keys and github milestones as values.
+     * Map with assembla milestones as keys and github milestones as values for desktop project.
      */
     const MILESTONE_MAP = array(
         3820293  => 1, // Backlog
         12345924 => 2, // SEO
         10195553 => 3, // Tech Backlog
     );
-    /**
-     * Map with assembla milestones as keys and github labels as values.
-     */
-    const MILESTONE_LABEL_MAP = array(
-        3820293  => 'backlog',        // Backlog
-        12345924 => 'seo',            // SEO
-        10195553 => 'tech-backlog',   // Tech Backlog
+
+    const MOBILE_MILESTONE_MAP = array(
+        3820293  => 1, // Backlog
+        12345924 => 2, // SEO
+        10195553 => 3, // Tech Backlog
     );
+
+    /** @var array - only Highest and lowest gets a label */
     const PRIORITY_LABEL_MAP = array(
         1 => 'priority:high',
-        2 => 'priority:high',
-        4 => 'priority:low',
         5 => 'priority:low',
     );
+
     /** @var array - closed ticket state */
-    const ASSEMBLA_TICKET_STATE = array(
+    const ASSEMBLA_TICKET_STATES = array(
         391028,     // invalid
         15864473,   // fixed
         495710,     // complete
         24127694,   // duplicate
     );
-    /** @var string - used in the assembla ticket link */
+
+    /** @var string - used to create assembla ticket link added in the GitHub issue description */
     const ASSEMBLA_WORKSPACE = 'crowd-fusion-tmz';
+
     /** @var string */
     const DUMP_FILE_NAME = 'dump.json';
+
     /** @var Client */
     public $client;
+
     /** @var array */
-    public $assemblaTicketFields;
+    public $milestoneFields;
+
     /** @var array */
-    public $assemblaCommentFields;
+    public $ticketFields;
+
+    /** @var array */
+    public $commentFields;
+
     /** @var array */
     public $tickets;
+
+    /** @var array - milestone_id => milestone_title */
+    public $milestones;
+
+    /** @var string */
+    protected $gitHubUsername;
+
+    /** @var string */
+    protected $gitHubDesktopRepo;
+
+    /** @var string */
+    protected $gitHubMobileRepo;
 
     /**
      * GitHub authentication is done in the constructor.
@@ -62,38 +82,79 @@ class Execute
         $dotEnv = new Dotenv();
         $dotEnv->load(__DIR__.'/../.env');
         $this->client->authenticate(getenv('GH_PERSONAL_ACCESS_TOKEN'), Client::AUTH_HTTP_PASSWORD);
-        $this->readDumpFile();
+        $this->gitHubUsername = getenv('GH_USERNAME');
+        $this->gitHubDesktopRepo = getenv('GH_REPO');
+        $this->gitHubMobileRepo = getenv('GH_MOBILE_REPO');
     }
 
     /**
-     * read the dump and save tickets and its fields to class members
+     * Reads the ticket:fields from dump file to an array
+     *
+     * @return array
+     */
+    public function getTicketFields()
+    {
+        if (!isset($this->ticketFields)) {
+            $this->readDumpFile();
+        }
+
+        return $this->ticketFields;
+    }
+
+    /**
+     * @return bool|string
      */
     public function readDumpFile()
     {
+        // milestone check for Desktop repo
+        try {
+            $this->checkMilestonesExistOnGitHub($this->gitHubDesktopRepo, Execute::MILESTONE_MAP);
+        } catch (\Exception $e) {
+            return $e->getMessage();
+        }
+
+        // milestone check for Mobile repo
+        try {
+            $this->checkMilestonesExistOnGitHub($this->gitHubMobileRepo, Execute::MOBILE_MILESTONE_MAP);
+        } catch (\Exception $e) {
+            return $e->getMessage();
+        }
+
         $arr = file(__DIR__.'/../'.Execute::DUMP_FILE_NAME);
         foreach ($arr as $value) {
             $parts = explode(',', $value, 2);
             switch ($parts[0]) {
-                case 'tickets:fields':
-                    $this->assemblaTicketFields = json_decode(trim($parts[1]));
+                case 'milestones:fields':
+                    $this->milestoneFields = json_decode(trim($parts[1]));
                     break;
-                case 'ticket_comments:fields':
-                    $this->assemblaCommentFields = json_decode(trim($parts[1]));
+                case 'milestones':
+                    $data = explode('milestones, ', trim($parts[1]));
+                    $milestone = array_combine($this->milestoneFields, json_decode($data[0]));
+
+                    if (in_array($milestone['id'], array_keys(Execute::MILESTONE_MAP))) {
+                        $this->milestones[$milestone['id']] = $milestone;
+                    }
+                    break;
+                case 'tickets:fields':
+                    $this->ticketFields = json_decode(trim($parts[1]));
                     break;
                 case 'tickets':
                     $data = explode('tickets, ', trim($parts[1]));
-                    $ticket = array_combine($this->assemblaTicketFields, json_decode($data[0]));
+                    $ticket = array_combine($this->ticketFields, json_decode($data[0]));
 
                     // tickets with milestones from the map and without closed state
                     if (in_array($ticket['milestone_id'],
                             array_keys(Execute::MILESTONE_MAP)) && !in_array($ticket['ticket_status_id'],
-                            Execute::ASSEMBLA_TICKET_STATE)) {
+                            Execute::ASSEMBLA_TICKET_STATES)) {
                         $this->tickets[$ticket['id']] = $ticket;
                     }
                     break;
+                case 'ticket_comments:fields':
+                    $this->commentFields = json_decode(trim($parts[1]));
+                    break;
                 case 'ticket_comments':
                     $data = explode('ticket_comments, ', trim($parts[1]));
-                    $comment = array_combine($this->assemblaCommentFields, json_decode($data[0]));
+                    $comment = array_combine($this->commentFields, json_decode($data[0]));
 
                     // only add comments of tickets in the milestone map and is not a code commit comment
                     if ($comment['comment'] !== '' && strpos($comment['comment'],
@@ -103,20 +164,47 @@ class Execute
                     break;
             }
         }
+
+        return true;
     }
 
     /**
-     * Reads the ticket:fields from dump file to an array
+     * @param string $repo
+     * @param array  $milestoneMap
+     *
+     * @throws \Exception
+     */
+    public function checkMilestonesExistOnGitHub(string $repo, array $milestoneMap)
+    {
+        $milestones = $this->getAllMilestoneIds($repo);
+        if (count(array_diff($milestoneMap, $milestones)) !== 0) {
+            throw new \Exception('All assembla milestones don\'t exist in GitHub project');
+        }
+    }
+
+    /**
+     * @param string $repo
      *
      * @return array
      */
-    public function getAssemblaTicketFields()
+    public function getAllMilestoneIds(string $repo)
     {
-        if (!isset($this->assemblaTicketFields)) {
+        $response = $this->client->repo()->milestones($this->gitHubUsername, $repo);
+        $milestones = [];
+        foreach ($response as $milestone) {
+            array_push($milestones, $milestone['number']);
+        }
+
+        return $milestones;
+    }
+
+    public function getMilestones()
+    {
+        if (!isset($this->milestones)) {
             $this->readDumpFile();
         }
 
-        return $this->assemblaTicketFields;
+        return $this->milestones;
     }
 
     /**
@@ -127,13 +215,8 @@ class Execute
      */
     public function createIssuesOnGitHub()
     {
-        $milestones = $this->getAllMilestoneIds(getenv('GH_MOBILE_REPO'));
-        if (count(array_diff($milestones, Execute::MILESTONE_MAP)) !== 0) {
-            throw new \Exception('All milestones don\'t exist in GitHub');
-        }
-
         if (!isset($this->tickets)) {
-            return null;
+            $this->readDumpFile();
         }
 
         $response = '';
@@ -141,31 +224,38 @@ class Execute
             $ticketNumber = $ticket['number'];
             $ticketSummary = $ticket['summary'];
             $description = $ticket['description'].'<br /><br />Assembla Ticket Link: https://app.assembla.com/spaces/'.Execute::ASSEMBLA_WORKSPACE.'/tickets/realtime_cardwall?ticket='.$ticketNumber;
+            $repo = $this->gitHubDesktopRepo; // default
+            $milestoneMap = Execute::MILESTONE_MAP; // default
+
+            // mobile-web ticket?
+            if (($ticketNumber > 6863 && $ticketNumber < 8401) || ($ticketNumber > 8400 && strpos($ticketSummary,
+                        '[M]') !== false)) {
+                $repo = $this->gitHubMobileRepo;
+                $milestoneMap = Execute::MOBILE_MILESTONE_MAP;
+            }
+
             $ticketParams = [
                 "title"     => $ticketSummary,
                 "body"      => $description,
-                "milestone" => Execute::MILESTONE_MAP[$ticket['milestone_id']],
-                "labels"    => ['assembla', Execute::MILESTONE_LABEL_MAP[$ticket['milestone_id']]],
+                "milestone" => $milestoneMap[$ticket['milestone_id']],
+                "labels"    => [
+                    'assembla',
+                    strtolower(str_replace(' ', '-', $this->milestones[$ticket['milestone_id']]['title'])),
+                ],
             ];
-            $repo = getenv('GH_REPO');
-
-            // mobile-web ticket check
-            if (($ticketNumber > 6863 && $ticketNumber < 8401) || ($ticketNumber > 8400 && strpos($ticketSummary,
-                        '[M]') !== false)) {
-                $repo = getenv('GH_MOBILE_REPO');
-            }
-
             // if the priority is set and is in the map then add an appropriate priority label to GitHub issue
             if (isset($ticket['priority']) && in_array($ticket['priority'], array_keys(Execute::PRIORITY_LABEL_MAP))) {
                 array_push($ticketParams['labels'], Execute::PRIORITY_LABEL_MAP[$ticket['priority']]);
             }
 
             try {
-                $response = $this->client->issues()->create(getenv('GH_USERNAME'), $repo, $ticketParams);
+                // step 1 - create issue
+                $response = $this->client->issues()->create($this->gitHubUsername, $repo, $ticketParams);
 
+                // step 2 - add comments to the issue
                 if (isset($ticket['comments']) && isset($response['number'])) {
                     foreach ($ticket['comments'] as $comment) {
-                        $this->addCommentToIssue($response['number'], $comment['comment']);
+                        $this->addCommentToIssue($repo, $response['number'], $comment['comment']);
                     }
                 }
             } catch (MissingArgumentException $e) {
@@ -178,30 +268,15 @@ class Execute
 
     /**
      * @param string $repo
-     *
-     * @return array
-     */
-    public function getAllMilestoneIds(string $repo)
-    {
-        $response = $this->client->repo()->milestones(getenv('GH_USERNAME'), $repo);
-        $milestones = [];
-        foreach ($response as $milestone) {
-            array_push($milestones, $milestone['number']);
-        }
-
-        return $milestones;
-    }
-
-    /**
      * @param int    $issueNumber
      * @param string $comment
      *
      * @return array|string
      */
-    public function addCommentToIssue(int $issueNumber, string $comment)
+    public function addCommentToIssue(string $repo, int $issueNumber, string $comment)
     {
         try {
-            $response = $this->client->issues()->comments()->create(getenv('GH_USERNAME'), getenv('GH_REPO'),
+            $response = $this->client->issues()->comments()->create($this->gitHubUsername, $repo,
                 $issueNumber, ['body' => $comment]);
         } catch (\ErrorException $e) {
             return $e->getMessage();
