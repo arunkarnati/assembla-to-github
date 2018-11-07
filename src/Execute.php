@@ -6,6 +6,7 @@ namespace Migrator;
 use Github\Client;
 use Github\Exception\MissingArgumentException;
 use Symfony\Component\Dotenv\Dotenv;
+use Psr\Log\LoggerInterface;
 
 class Execute
 {
@@ -47,6 +48,9 @@ class Execute
     /** @var Client */
     public $client;
 
+    /** @var LoggerInterface */
+    public $logger;
+
     /** @var array */
     public $milestoneFields;
 
@@ -74,11 +78,13 @@ class Execute
     /**
      * GitHub authentication is done in the constructor.
      *
-     * @param Client|null $client
+     * @param Client|null     $client
+     * @param LoggerInterface $logger
      */
-    public function __construct(Client $client = null)
+    public function __construct(Client $client = null, LoggerInterface $logger = null)
     {
         $this->client = $client ?: new Client();
+        $this->logger = $logger;
         $dotEnv = new Dotenv();
         $dotEnv->load(__DIR__.'/../.env');
         $this->client->authenticate(getenv('GH_PERSONAL_ACCESS_TOKEN'), Client::AUTH_HTTP_PASSWORD);
@@ -165,6 +171,14 @@ class Execute
             }
         }
 
+        file_put_contents(__DIR__.'/../milestones.json', json_encode($this->milestones));
+        file_put_contents(__DIR__.'/../tickets.json', json_encode($this->tickets));
+
+        if ($this->logger) {
+            $this->logger->info('Completed: Reading the dump file');
+            $this->logger->info('Number of tickets to be imported - '.count($this->tickets));
+        }
+
         return true;
     }
 
@@ -215,12 +229,21 @@ class Execute
      */
     public function createIssuesOnGitHub()
     {
-        if (!isset($this->tickets)) {
-            $this->readDumpFile();
+        $tickets = json_decode(file_get_contents(__DIR__.'/../tickets.json'), true);
+        $milestones = json_decode(file_get_contents(__DIR__.'/../milestones.json'), true);
+
+        if (count($tickets) === 0) {
+            return null;
         }
 
+        // exclude tickets that are already created on GitHub
+        $createdTickets = array_filter(file(__DIR__.'/../log_table.txt'), function ($v) {
+            return $v !== null && $v !== '' && $v !== [] && $v !== "\n";
+        });
+
         $response = '';
-        foreach ($this->tickets as $ticket) {
+        foreach ($tickets as $ticket) {
+            print_r($ticket);
             $ticketNumber = $ticket['number'];
             $ticketSummary = $ticket['summary'];
             $description = $ticket['description'].'<br /><br />Assembla Ticket Link: https://app.assembla.com/spaces/'.Execute::ASSEMBLA_WORKSPACE.'/tickets/realtime_cardwall?ticket='.$ticketNumber;
@@ -240,7 +263,7 @@ class Execute
                 "milestone" => $milestoneMap[$ticket['milestone_id']],
                 "labels"    => [
                     'assembla',
-                    strtolower(str_replace(' ', '-', $this->milestones[$ticket['milestone_id']]['title'])),
+                    strtolower(str_replace(' ', '-', $milestones[$ticket['milestone_id']]['title'])),
                 ],
             ];
             // if the priority is set and is in the map then add an appropriate priority label to GitHub issue
@@ -251,11 +274,14 @@ class Execute
             try {
                 // step 1 - create issue
                 $response = $this->client->issues()->create($this->gitHubUsername, $repo, $ticketParams);
+                $gitHubTicketNumber = $response['number'];
+                $entry = $ticketNumber.','.$gitHubTicketNumber."\n";
+                file_put_contents(__DIR__.'/../log_table.txt', $entry, FILE_APPEND);
 
                 // step 2 - add comments to the issue
-                if (isset($ticket['comments']) && isset($response['number'])) {
+                if (isset($ticket['comments'])) {
                     foreach ($ticket['comments'] as $comment) {
-                        $this->addCommentToIssue($repo, $response['number'], $comment['comment']);
+                        $this->addCommentToIssue($repo, $gitHubTicketNumber, $comment['comment']);
                     }
                 }
             } catch (MissingArgumentException $e) {
@@ -292,5 +318,12 @@ class Execute
         }
 
         return $this->tickets;
+    }
+
+    public function getRateLimit()
+    {
+        $response = $this->client->rateLimit()->getRateLimits();
+
+        return $response['resources']['core']['remaining'];
     }
 }

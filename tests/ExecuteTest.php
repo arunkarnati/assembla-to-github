@@ -5,6 +5,9 @@ namespace Tests;
 
 use Github\Client;
 use Migrator\Execute;
+use Monolog\Handler\FirePHPHandler;
+use Monolog\Handler\StreamHandler;
+use Monolog\Logger;
 use PHPUnit\Framework\TestCase;
 
 class ExecuteTest extends TestCase
@@ -14,7 +17,10 @@ class ExecuteTest extends TestCase
 
     public function setUp()
     {
-        $this->execute = new Execute();
+        $logger = new Logger('debug_logger');
+        $logger->pushHandler(new StreamHandler(__DIR__.'/../debug.log', Logger::DEBUG));
+        $logger->pushHandler(new FirePHPHandler());
+        $this->execute = new Execute(new Client(), $logger);
     }
 
     public function testReadDumpFile()
@@ -35,5 +41,10 @@ class ExecuteTest extends TestCase
     public function testCreateIssuesOnGitHub()
     {
         print_r($this->execute->createIssuesOnGitHub());
+    }
+
+    public function testGetRateLimit()
+    {
+        print_r($this->execute->getRateLimit());
     }
 }
