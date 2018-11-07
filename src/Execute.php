@@ -237,59 +237,88 @@ class Execute
         }
 
         // exclude tickets that are already created on GitHub
-        $createdTickets = array_filter(file(__DIR__.'/../log_table.txt'), function ($v) {
+        $createdTicketData = array_filter(file(__DIR__.'/../log_table.txt'), function ($v) {
             return $v !== null && $v !== '' && $v !== [] && $v !== "\n";
         });
+        $createdTicketNumbers = $this->getCreatedTicketNumbers($createdTicketData);
 
         $response = '';
         foreach ($tickets as $ticket) {
-            print_r($ticket);
             $ticketNumber = $ticket['number'];
-            $ticketSummary = $ticket['summary'];
-            $description = $ticket['description'].'<br /><br />Assembla Ticket Link: https://app.assembla.com/spaces/'.Execute::ASSEMBLA_WORKSPACE.'/tickets/realtime_cardwall?ticket='.$ticketNumber;
-            $repo = $this->gitHubDesktopRepo; // default
-            $milestoneMap = Execute::MILESTONE_MAP; // default
+            if (!in_array($ticketNumber, $createdTicketNumbers)) {
+                $this->logger->info('creating '.$ticketNumber);
+                $ticketSummary = $ticket['summary'];
+                $description = $ticket['description'].'<br /><br />Assembla Ticket Link: https://app.assembla.com/spaces/'.Execute::ASSEMBLA_WORKSPACE.'/tickets/realtime_cardwall?ticket='.$ticketNumber;
+                $repo = $this->gitHubDesktopRepo; // default
+                $milestoneMap = Execute::MILESTONE_MAP; // default
 
-            // mobile-web ticket?
-            if (($ticketNumber > 6863 && $ticketNumber < 8401) || ($ticketNumber > 8400 && strpos($ticketSummary,
-                        '[M]') !== false)) {
-                $repo = $this->gitHubMobileRepo;
-                $milestoneMap = Execute::MOBILE_MILESTONE_MAP;
-            }
-
-            $ticketParams = [
-                "title"     => $ticketSummary,
-                "body"      => $description,
-                "milestone" => $milestoneMap[$ticket['milestone_id']],
-                "labels"    => [
-                    'assembla',
-                    strtolower(str_replace(' ', '-', $milestones[$ticket['milestone_id']]['title'])),
-                ],
-            ];
-            // if the priority is set and is in the map then add an appropriate priority label to GitHub issue
-            if (isset($ticket['priority']) && in_array($ticket['priority'], array_keys(Execute::PRIORITY_LABEL_MAP))) {
-                array_push($ticketParams['labels'], Execute::PRIORITY_LABEL_MAP[$ticket['priority']]);
-            }
-
-            try {
-                // step 1 - create issue
-                $response = $this->client->issues()->create($this->gitHubUsername, $repo, $ticketParams);
-                $gitHubTicketNumber = $response['number'];
-                $entry = $ticketNumber.','.$gitHubTicketNumber."\n";
-                file_put_contents(__DIR__.'/../log_table.txt', $entry, FILE_APPEND);
-
-                // step 2 - add comments to the issue
-                if (isset($ticket['comments'])) {
-                    foreach ($ticket['comments'] as $comment) {
-                        $this->addCommentToIssue($repo, $gitHubTicketNumber, $comment['comment']);
-                    }
+                // mobile-web ticket?
+                if (($ticketNumber > 6863 && $ticketNumber < 8401) || ($ticketNumber > 8400 && strpos($ticketSummary,
+                            '[M]') !== false)) {
+                    $repo = $this->gitHubMobileRepo;
+                    $milestoneMap = Execute::MOBILE_MILESTONE_MAP;
                 }
-            } catch (MissingArgumentException $e) {
-                return $e->getMessage();
+
+                $ticketParams = [
+                    "title"     => $ticketSummary,
+                    "body"      => $description,
+                    "milestone" => $milestoneMap[$ticket['milestone_id']],
+                    "labels"    => [
+                        'assembla',
+                        strtolower(str_replace(' ', '-', $milestones[$ticket['milestone_id']]['title'])),
+                    ],
+                ];
+                // if the priority is set and is in the map then add an appropriate priority label to GitHub issue
+                if (isset($ticket['priority']) && in_array($ticket['priority'],
+                        array_keys(Execute::PRIORITY_LABEL_MAP))) {
+                    array_push($ticketParams['labels'], Execute::PRIORITY_LABEL_MAP[$ticket['priority']]);
+                }
+
+                try {
+                    // step 1 - create issue
+                    $response = $this->client->issues()->create($this->gitHubUsername, $repo, $ticketParams);
+                    if (isset($response['number'])) {
+                        $this->logger->info('created ticket '.$ticketNumber.' on GitHub and the Issue ID is '.$response['number']);
+                        $gitHubTicketNumber = $response['number'];
+                        $entry = $ticketNumber.','.$gitHubTicketNumber."\n";
+                        file_put_contents(__DIR__.'/../log_table.txt', $entry, FILE_APPEND);
+                    }
+
+                    // step 2 - add comments to the issue
+                    if (isset($ticket['comments'])) {
+                        foreach ($ticket['comments'] as $comment) {
+                            $this->addCommentToIssue($repo, $gitHubTicketNumber, $comment['comment']);
+                        }
+                    }
+                } catch (MissingArgumentException $e) {
+                    return $e->getMessage();
+                }
             }
         }
 
         return $response;
+    }
+
+    /**
+     * @param array $ticketData
+     *  ticketData array looks like
+     *
+     *  Array(
+     *      0 => 8499,10
+     *      1 => 8500, 17
+     *  )
+     *
+     * @return array
+     */
+    public function getCreatedTicketNumbers(array $ticketData)
+    {
+        $ticketNumbers = [];
+        foreach ($ticketData as $row) {
+            $temp = explode(',', $row);
+            $ticketNumbers[] = $temp[0];
+        }
+
+        return $ticketNumbers;
     }
 
     /**
