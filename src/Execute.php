@@ -43,7 +43,7 @@ class Execute
     const ASSEMBLA_WORKSPACE = 'crowd-fusion-tmz';
 
     /** @var string */
-    const DUMP_FILE_NAME = 'dump.json';
+    const DUMP_FILE_NAME = 'dump1.json';
 
     /** @var Client */
     public $client;
@@ -126,6 +126,12 @@ class Execute
             return $e->getMessage();
         }
 
+        // exclude tickets that are already created on GitHub
+        $createdTicketData = array_filter(file(__DIR__.'/../log_table.txt'), function ($v) {
+            return $v !== null && $v !== '' && $v !== [] && $v !== "\n";
+        });
+        $createdTicketNumbers = $this->getCreatedTicketNumbers($createdTicketData);
+
         $arr = file(__DIR__.'/../'.Execute::DUMP_FILE_NAME);
         foreach ($arr as $value) {
             $parts = explode(',', $value, 2);
@@ -134,8 +140,7 @@ class Execute
                     $this->milestoneFields = json_decode(trim($parts[1]));
                     break;
                 case 'milestones':
-                    $data = explode('milestones, ', trim($parts[1]));
-                    $milestone = array_combine($this->milestoneFields, json_decode($data[0]));
+                    $milestone = array_combine($this->milestoneFields, json_decode(trim($parts[1])));
 
                     if (in_array($milestone['id'], array_keys(Execute::MILESTONE_MAP))) {
                         $this->milestones[$milestone['id']] = $milestone;
@@ -145,13 +150,12 @@ class Execute
                     $this->ticketFields = json_decode(trim($parts[1]));
                     break;
                 case 'tickets':
-                    $data = explode('tickets, ', trim($parts[1]));
-                    $ticket = array_combine($this->ticketFields, json_decode($data[0]));
+                    $ticket = array_combine($this->ticketFields, json_decode(trim($parts[1])));
 
-                    // tickets with milestones from the map and without closed state
-                    if (in_array($ticket['milestone_id'],
-                            array_keys(Execute::MILESTONE_MAP)) && !in_array($ticket['ticket_status_id'],
-                            Execute::ASSEMBLA_TICKET_STATES)) {
+                    // tickets with milestones in the map, without a closed state and is not created yet
+                    if (in_array($ticket['milestone_id'], array_keys(Execute::MILESTONE_MAP))
+                        && !in_array($ticket['ticket_status_id'], Execute::ASSEMBLA_TICKET_STATES)
+                        && !in_array($ticket['number'], $createdTicketNumbers) && $ticket['number'] > 5911) {
                         $this->tickets[$ticket['id']] = $ticket;
                     }
                     break;
@@ -159,11 +163,10 @@ class Execute
                     $this->commentFields = json_decode(trim($parts[1]));
                     break;
                 case 'ticket_comments':
-                    $data = explode('ticket_comments, ', trim($parts[1]));
-                    $comment = array_combine($this->commentFields, json_decode($data[0]));
+                    $comment = array_combine($this->commentFields, json_decode(trim($parts[1])));
 
-                    // only add comments of tickets in the milestone map and is not a code commit comment
-                    if ($comment['comment'] !== '' && strpos($comment['comment'],
+                    // only add comments that are not code commit comments and associated with filtered tickets
+                    if (isset($comment['comment']) && strpos($comment['comment'],
                             '[[r:3:') === false && isset($this->tickets[$comment['ticket_id']])) {
                         $this->tickets[$comment['ticket_id']]['comments'][] = $comment;
                     }
@@ -171,8 +174,9 @@ class Execute
             }
         }
 
-        file_put_contents(__DIR__.'/../milestones.json', json_encode($this->milestones));
-        file_put_contents(__DIR__.'/../tickets.json', json_encode($this->tickets));
+        file_put_contents(__DIR__.'/../tickets.json', isset($this->tickets) ? json_encode($this->tickets) : '');
+        file_put_contents(__DIR__.'/../milestones.json',
+            isset($this->milestones) ? json_encode($this->milestones) : '');
 
         if ($this->logger) {
             $this->logger->info('Completed: Reading the dump file');
@@ -212,6 +216,28 @@ class Execute
         return $milestones;
     }
 
+    /**
+     * @param array $ticketData
+     *  ticketData array looks like
+     *
+     *  Array(
+     *      0 => 8499,10
+     *      1 => 8500, 17
+     *  )
+     *
+     * @return array
+     */
+    public function getCreatedTicketNumbers(array $ticketData)
+    {
+        $ticketNumbers = [];
+        foreach ($ticketData as $row) {
+            $temp = explode(',', $row);
+            $ticketNumbers[] = $temp[0];
+        }
+
+        return $ticketNumbers;
+    }
+
     public function getMilestones()
     {
         if (!isset($this->milestones)) {
@@ -236,89 +262,59 @@ class Execute
             return null;
         }
 
-        // exclude tickets that are already created on GitHub
-        $createdTicketData = array_filter(file(__DIR__.'/../log_table.txt'), function ($v) {
-            return $v !== null && $v !== '' && $v !== [] && $v !== "\n";
-        });
-        $createdTicketNumbers = $this->getCreatedTicketNumbers($createdTicketData);
-
         $response = '';
         foreach ($tickets as $ticket) {
             $ticketNumber = $ticket['number'];
-            if (!in_array($ticketNumber, $createdTicketNumbers)) {
-                $this->logger->info('creating '.$ticketNumber);
-                $ticketSummary = $ticket['summary'];
-                $description = $ticket['description'].'<br /><br />Assembla Ticket Link: https://app.assembla.com/spaces/'.Execute::ASSEMBLA_WORKSPACE.'/tickets/realtime_cardwall?ticket='.$ticketNumber;
-                $repo = $this->gitHubDesktopRepo; // default
-                $milestoneMap = Execute::MILESTONE_MAP; // default
+            $this->logger->info('creating '.$ticketNumber);
+            $ticketSummary = $ticket['summary'];
+            $description = $ticket['description'].'<br /><br />Assembla Ticket Link: https://app.assembla.com/spaces/'.Execute::ASSEMBLA_WORKSPACE.'/tickets/realtime_cardwall?ticket='.$ticketNumber;
+            $repo = $this->gitHubDesktopRepo; // default
+            $milestoneMap = Execute::MILESTONE_MAP; // default
 
-                // mobile-web ticket?
-                if (($ticketNumber > 6863 && $ticketNumber < 8401) || ($ticketNumber > 8400 && strpos($ticketSummary,
-                            '[M]') !== false)) {
-                    $repo = $this->gitHubMobileRepo;
-                    $milestoneMap = Execute::MOBILE_MILESTONE_MAP;
+            // mobile-web ticket?
+            if (($ticketNumber > 6863 && $ticketNumber < 8401) || ($ticketNumber > 8400 && strpos($ticketSummary,
+                        '[M]') !== false)) {
+                $repo = $this->gitHubMobileRepo;
+                $milestoneMap = Execute::MOBILE_MILESTONE_MAP;
+            }
+
+            $ticketParams = [
+                "title"     => $ticketSummary,
+                "body"      => $description,
+                "milestone" => $milestoneMap[$ticket['milestone_id']],
+                "labels"    => [
+                    'assembla',
+                    strtolower(str_replace(' ', '-', $milestones[$ticket['milestone_id']]['title'])),
+                ],
+            ];
+            // if the priority is set and is in the map then add an appropriate priority label to GitHub issue
+            if (isset($ticket['priority']) && in_array($ticket['priority'],
+                    array_keys(Execute::PRIORITY_LABEL_MAP))) {
+                array_push($ticketParams['labels'], Execute::PRIORITY_LABEL_MAP[$ticket['priority']]);
+            }
+
+            try {
+                // step 1 - create issue
+                $response = $this->client->issues()->create($this->gitHubUsername, $repo, $ticketParams);
+                if (isset($response['number'])) {
+                    $this->logger->info('created ticket '.$ticketNumber.' on GitHub and the Issue ID is '.$response['number']);
+                    $gitHubTicketNumber = $response['number'];
+                    $entry = $ticketNumber.','.$gitHubTicketNumber."\n";
+                    file_put_contents(__DIR__.'/../log_table.txt', $entry, FILE_APPEND);
                 }
 
-                $ticketParams = [
-                    "title"     => $ticketSummary,
-                    "body"      => $description,
-                    "milestone" => $milestoneMap[$ticket['milestone_id']],
-                    "labels"    => [
-                        'assembla',
-                        strtolower(str_replace(' ', '-', $milestones[$ticket['milestone_id']]['title'])),
-                    ],
-                ];
-                // if the priority is set and is in the map then add an appropriate priority label to GitHub issue
-                if (isset($ticket['priority']) && in_array($ticket['priority'],
-                        array_keys(Execute::PRIORITY_LABEL_MAP))) {
-                    array_push($ticketParams['labels'], Execute::PRIORITY_LABEL_MAP[$ticket['priority']]);
-                }
-
-                try {
-                    // step 1 - create issue
-                    $response = $this->client->issues()->create($this->gitHubUsername, $repo, $ticketParams);
-                    if (isset($response['number'])) {
-                        $this->logger->info('created ticket '.$ticketNumber.' on GitHub and the Issue ID is '.$response['number']);
-                        $gitHubTicketNumber = $response['number'];
-                        $entry = $ticketNumber.','.$gitHubTicketNumber."\n";
-                        file_put_contents(__DIR__.'/../log_table.txt', $entry, FILE_APPEND);
+                // step 2 - add comments to the issue
+                if (isset($ticket['comments'])) {
+                    foreach ($ticket['comments'] as $comment) {
+                        $this->addCommentToIssue($repo, $gitHubTicketNumber, $comment['comment']);
                     }
-
-                    // step 2 - add comments to the issue
-                    if (isset($ticket['comments'])) {
-                        foreach ($ticket['comments'] as $comment) {
-                            $this->addCommentToIssue($repo, $gitHubTicketNumber, $comment['comment']);
-                        }
-                    }
-                } catch (MissingArgumentException $e) {
-                    return $e->getMessage();
                 }
+            } catch (MissingArgumentException $e) {
+                return $e->getMessage();
             }
         }
 
         return $response;
-    }
-
-    /**
-     * @param array $ticketData
-     *  ticketData array looks like
-     *
-     *  Array(
-     *      0 => 8499,10
-     *      1 => 8500, 17
-     *  )
-     *
-     * @return array
-     */
-    public function getCreatedTicketNumbers(array $ticketData)
-    {
-        $ticketNumbers = [];
-        foreach ($ticketData as $row) {
-            $temp = explode(',', $row);
-            $ticketNumbers[] = $temp[0];
-        }
-
-        return $ticketNumbers;
     }
 
     /**

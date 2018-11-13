@@ -12,7 +12,7 @@ logs/
 tmp/
 vendor/
 log.txt
-dump.json
+dump*.json
 tickets.json
 milestones.json
 log_table.txt
