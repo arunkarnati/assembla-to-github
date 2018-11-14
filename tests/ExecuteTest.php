@@ -47,4 +47,10 @@ class ExecuteTest extends TestCase
     {
         print_r($this->execute->getRateLimit());
     }
+
+    public function testReplaceUrls()
+    {
+        $subject = '[[url:http:\/\/www.examiner.com\/article\/jia-jia-the-robot-eerily-human-like-creation-is-jaw-dropping-conversationalist|YouTube Embeds]]';
+        print_r($this->execute->replaceUrls($subject));
+    }
 }

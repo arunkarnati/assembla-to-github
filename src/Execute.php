@@ -156,6 +156,7 @@ class Execute
                     if (in_array($ticket['milestone_id'], array_keys(Execute::MILESTONE_MAP))
                         && !in_array($ticket['ticket_status_id'], Execute::ASSEMBLA_TICKET_STATES)
                         && !in_array($ticket['number'], $createdTicketNumbers) && $ticket['number'] > 5911) {
+                        $ticket['description'] = $this->replaceUrls($ticket['description']);
                         $this->tickets[$ticket['id']] = $ticket;
                     }
                     break;
@@ -244,7 +245,7 @@ class Execute
     public function replaceUrls($subject)
     {
         // replace links
-        $text = preg_replace_callback('/\[\[url:(.+)\|(.+)\]\]/',
+        $text = preg_replace_callback('/\[\[url:([^\]]+)\|(.+?)\]\]/i',
             function ($matches) {
                 return '['.$matches[2].']('.$matches[1].')';
             },
@@ -252,9 +253,9 @@ class Execute
         );
 
         // replace image shortcodes
-        $text = preg_replace_callback('/\[\[image\:(.+)\]\]/',
+        $text = preg_replace_callback('/\[\[image\:(.+?)\]\]/i',
             function ($matches) {
-                return 'https://app.assembla.com/spaces/'.Execute::ASSEMBLA_WORKSPACE.'/documents/'.$matches[1].'/download/'.$matches[1];
+                return 'link to image: https://app.assembla.com/spaces/'.Execute::ASSEMBLA_WORKSPACE.'/documents/'.$matches[1].'/download/'.$matches[1];
             },
             $text
         );
