@@ -164,10 +164,13 @@ class Execute
                     break;
                 case 'ticket_comments':
                     $comment = array_combine($this->commentFields, json_decode(trim($parts[1])));
+                    $commentText = $comment['comment'];
 
                     // only add comments that are not code commit comments and associated with filtered tickets
-                    if (isset($comment['comment']) && strpos($comment['comment'],
-                            '[[r:3:') === false && isset($this->tickets[$comment['ticket_id']])) {
+                    if (isset($commentText) && isset($this->tickets[$comment['ticket_id']])
+                        && preg_match('/\[\[r\:3\:/i', $commentText) === 0
+                        && preg_match('/Re\:\s*\#/i', $commentText) === 0) {
+                        $comment['comment'] = $this->replaceUrls($commentText);
                         $this->tickets[$comment['ticket_id']]['comments'][] = $comment;
                     }
                     break;
@@ -236,6 +239,27 @@ class Execute
         }
 
         return $ticketNumbers;
+    }
+
+    public function replaceUrls($subject)
+    {
+        // replace links
+        $text = preg_replace_callback('/\[\[url:(.+)\|(.+)\]\]/',
+            function ($matches) {
+                return '['.$matches[2].']('.$matches[1].')';
+            },
+            $subject
+        );
+
+        // replace image shortcodes
+        $text = preg_replace_callback('/\[\[image\:(.+)\]\]/',
+            function ($matches) {
+                return 'https://app.assembla.com/spaces/'.Execute::ASSEMBLA_WORKSPACE.'/documents/'.$matches[1].'/download/'.$matches[1];
+            },
+            $text
+        );
+
+        return $text;
     }
 
     public function getMilestones()
