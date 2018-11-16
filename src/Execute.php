@@ -14,15 +14,15 @@ class Execute
      * Map with assembla milestones as keys and github milestones as values for desktop project.
      */
     const MILESTONE_MAP = array(
-        3820293  => 1, // Backlog
-        12345924 => 2, // SEO
-        10195553 => 3, // Tech Backlog
+        3820293  => 6, // Backlog
+        12345924 => 7, // SEO
+        10195553 => 8, // Tech Backlog
     );
 
     const MOBILE_MILESTONE_MAP = array(
-        3820293  => 1, // Backlog
-        12345924 => 2, // SEO
-        10195553 => 3, // Tech Backlog
+        3820293  => 6, // Backlog
+        12345924 => 5, // SEO
+        10195553 => 4, // Tech Backlog
     );
 
     /** @var array - only Highest and lowest gets a label */
