@@ -168,10 +168,11 @@ class Execute
                     $commentText = $comment['comment'];
 
                     // only add comments that are not code commit comments and associated with filtered tickets
-                    if (isset($commentText) && isset($this->tickets[$comment['ticket_id']])
+                    if (isset($commentText) && strlen($commentText) > 0 && isset($this->tickets[$comment['ticket_id']])
                         && preg_match('/\[\[r\:3\:/i', $commentText) === 0
                         && preg_match('/Re\:\s*\#/i', $commentText) === 0) {
-                        $comment['comment'] = $this->replaceUrls($commentText);
+                        // add Assembla user_id of the commenter to the actual comment.
+                        $comment['comment'] = $this->replaceUrls($commentText)."<br /><br /> originally commented by Assembla user: ".$comment['user_id'];
                         $this->tickets[$comment['ticket_id']]['comments'][] = $comment;
                     }
                     break;
