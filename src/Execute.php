@@ -19,7 +19,7 @@ class Execute
         10195553 => 8, // Tech Backlog
     );
 
-    const MOBILE_MILESTONE_MAP = array(
+    const SECOND_MILESTONE_MAP = array(
         3820293  => 6, // Backlog
         12345924 => 5, // SEO
         10195553 => 4, // Tech Backlog
@@ -121,7 +121,7 @@ class Execute
 
         // milestone check for Mobile repo
         try {
-            $this->checkMilestonesExistOnGitHub($this->gitHubMobileRepo, Execute::MOBILE_MILESTONE_MAP);
+            $this->checkMilestonesExistOnGitHub($this->gitHubMobileRepo, Execute::SECOND_MILESTONE_MAP);
         } catch (\Exception $e) {
             return $e->getMessage();
         }
@@ -184,7 +184,7 @@ class Execute
             isset($this->milestones) ? json_encode($this->milestones) : '');
 
         if ($this->logger) {
-            $this->logger->info('Completed: Reading the dump file');
+            $this->logger->info('Completed: Reading the dump to a file with tickets in JSON format');
             $this->logger->info('Number of tickets to be imported - '.count($this->tickets));
         }
 
@@ -297,13 +297,6 @@ class Execute
             $repo = $this->gitHubDesktopRepo; // default
             $milestoneMap = Execute::MILESTONE_MAP; // default
 
-            // mobile-web ticket?
-            if (($ticketNumber > 6863 && $ticketNumber < 8401) || ($ticketNumber > 8400 && strpos($ticketSummary,
-                        '[M]') !== false)) {
-                $repo = $this->gitHubMobileRepo;
-                $milestoneMap = Execute::MOBILE_MILESTONE_MAP;
-            }
-
             $ticketParams = [
                 "title"     => $ticketSummary,
                 "body"      => $description,
@@ -376,5 +369,29 @@ class Execute
         $response = $this->client->rateLimit()->getRateLimits();
 
         return $response['resources']['core']['remaining'];
+    }
+
+    /**
+     * @param $repo
+     * @param $milestone
+     *
+     * @throws MissingArgumentException
+     */
+    public function createMilestone($repo, $milestone)
+    {
+        if (!isset($milestone['title'])) {
+            throw new MissingArgumentException('title');
+        }
+
+        $params['title'] = $milestone['title'];
+
+        if (isset($milestone['description'])) {
+            $params['milestone'] = $milestone['description'];
+        }
+
+        if (isset($milestone['due_date'])) {
+            $params['due_on'] = $milestone['due_date'];
+        }
+        $this->client->issues()->milestones()->create($this->gitHubUsername, $repo, $params);
     }
 }

@@ -11,11 +11,10 @@ cache/
 logs/
 tmp/
 vendor/
-log.txt
+log*.txt
 dump*.json
 tickets.json
 milestones.json
-log_table.txt
 
 # Deployment/IDE Tools #
 ############

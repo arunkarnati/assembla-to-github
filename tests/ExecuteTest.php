@@ -40,7 +40,7 @@ class ExecuteTest extends TestCase
 
     public function testCreateIssuesOnGitHub()
     {
-        print_r($this->execute->createIssuesOnGitHub());
+        $this->execute->createIssuesOnGitHub();
     }
 
     public function testGetRateLimit()
