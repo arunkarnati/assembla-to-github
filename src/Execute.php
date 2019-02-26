@@ -37,6 +37,9 @@ class Execute
 
     const WORKFLOW_PROPERTY_DEFS = array(
         579473  => 'Device',
+        579513  => 'Ticket Type',
+        680473  => 'Build Discovered',
+        1081463 => 'Build Fixed',
         1096783 => 'App',
     );
 
@@ -168,12 +171,6 @@ class Execute
                 return $e->getMessage();
             }
         }
-
-        // exclude tickets that are already created on GitHub
-        $createdTicketData = array_filter(file(__DIR__.'/../'.$this->logFileName), function ($v) {
-            return $v !== null && $v !== '' && $v !== [] && $v !== "\n";
-        });
-        $createdTicketNumbers = $this->getCreatedTicketNumbers($createdTicketData);
 
         $arr = file(__DIR__.'/../'.$this->dumpFileName);
         foreach ($arr as $value) {
@@ -335,8 +332,8 @@ class Execute
         foreach ($this->tickets as $ticket) {
             $this->tickets[$ticket['id']]['repo'] = $this->gitHubAndroidRepo;
 
-            if (strpos($ticket['Device'], 'iOS') > 0 || (!empty($ticket['App']) && strpos($ticket['App'],
-                        'iOS') > 0) || (!empty($ticket['milestone']) && strpos($ticket['milestone'], 'iOS') > 0)) {
+            if (strpos($ticket['Device'], 'iOS') !== false || (!empty($ticket['App']) && strpos($ticket['App'],
+                        'iOS') !== false) || (!empty($ticket['milestone']) && strpos($ticket['milestone'], 'iOS') !== false)) {
                 $this->tickets[$ticket['id']]['repo'] = $this->gitHubIosRepo;
                 $counter = $counter + 1;
             }
@@ -368,8 +365,18 @@ class Execute
             return null;
         }
 
+        // exclude tickets that are already created on GitHub
+        $createdTicketData = array_filter(file(__DIR__.'/../'.$this->logFileName), function ($v) {
+            return $v !== null && $v !== '' && $v !== [] && $v !== "\n";
+        });
+        $createdTicketNumbers = $this->getCreatedTicketNumbers($createdTicketData);
+
         $response = '';
         foreach ($tickets as $ticket) {
+            if (in_array($ticket['number'], $createdTicketNumbers)) {
+                continue;
+            }
+
             $ticketNumber = $ticket['number'];
             $ticketSummary = $ticket['summary'];
             $description = $ticket['description'].'<br /><br />Assembla Ticket Link: https://app.assembla.com/spaces/'.Execute::ASSEMBLA_WORKSPACE.'/tickets/realtime_cardwall?ticket='.$ticketNumber;
@@ -383,10 +390,31 @@ class Execute
                     strtolower(str_replace(' ', '-', $ticket['milestone'])),
                 ],
             ];
+
             // if the priority is set and is in the map then add an appropriate priority label to GitHub issue
             if (isset($ticket['priority']) && in_array($ticket['priority'],
                     array_keys(Execute::PRIORITY_LABEL_MAP))) {
                 array_push($ticketParams['labels'], Execute::PRIORITY_LABEL_MAP[$ticket['priority']]);
+            }
+
+            if ($ticket['estimate'] > 0) {
+                array_push($ticketParams['labels'], 'estimate-'.$ticket['estimate']);
+            }
+
+            if (!is_null($ticket['due_date'])) {
+                array_push($ticketParams['labels'], $ticket['due_date']);
+            }
+
+            if (!empty($ticket['Ticket Type'])) {
+                array_push($ticketParams['labels'], $ticket['Ticket Type']);
+            }
+
+            if (isset($ticket['Build Discovered'])) {
+                array_push($ticketParams['labels'], 'build-discovered '.$ticket['Build Discovered']);
+            }
+
+            if (isset($ticket['Build Fixed'])) {
+                array_push($ticketParams['labels'], 'build-fixed '.$ticket['Build Fixed']);
             }
 
             try {
