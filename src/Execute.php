@@ -379,17 +379,28 @@ class Execute
 
             $ticketNumber = $ticket['number'];
             $ticketSummary = $ticket['summary'];
-            $description = $ticket['description'].'<br /><br />Assembla Ticket Link: https://app.assembla.com/spaces/'.Execute::ASSEMBLA_WORKSPACE.'/tickets/realtime_cardwall?ticket='.$ticketNumber;
+
+            if (isset($ticket['Build Discovered'])) {
+                $ticket['description'] .= '<br /><br /><strong>Build Discovered:</strong><br />'.$ticket['Build Discovered'];
+            }
+
+            if (isset($ticket['Build Fixed'])) {
+                $ticket['description'] .= '<br /><br /><strong>Build Fixed:</strong><br />'.$ticket['Build Fixed'];
+            }
+
+            $ticket['description'] .= '<br /><br />Assembla Ticket Link: https://app.assembla.com/spaces/'.Execute::ASSEMBLA_WORKSPACE.'/tickets/realtime_cardwall?ticket='.$ticketNumber;
+
             $repo = $ticket['repo']; // default
 
             $ticketParams = [
                 "title"  => $ticketSummary,
-                "body"   => $description,
-                "labels" => [
-                    'assembla',
-                    strtolower(str_replace(' ', '-', $ticket['milestone'])),
-                ],
+                "body"   => $ticket['description'],
+                "labels" => ['assembla'],
             ];
+
+            if (!empty($ticket['milestone'])) {
+                array_push($ticketParams['labels'], strtolower(str_replace(' ', '-', $ticket['milestone'])));
+            }
 
             // if the priority is set and is in the map then add an appropriate priority label to GitHub issue
             if (isset($ticket['priority']) && in_array($ticket['priority'],
@@ -402,19 +413,11 @@ class Execute
             }
 
             if (!is_null($ticket['due_date'])) {
-                array_push($ticketParams['labels'], $ticket['due_date']);
+                array_push($ticketParams['labels'], (string)$ticket['due_date']);
             }
 
             if (!empty($ticket['Ticket Type'])) {
                 array_push($ticketParams['labels'], $ticket['Ticket Type']);
-            }
-
-            if (isset($ticket['Build Discovered'])) {
-                array_push($ticketParams['labels'], 'build-discovered '.$ticket['Build Discovered']);
-            }
-
-            if (isset($ticket['Build Fixed'])) {
-                array_push($ticketParams['labels'], 'build-fixed '.$ticket['Build Fixed']);
             }
 
             try {
