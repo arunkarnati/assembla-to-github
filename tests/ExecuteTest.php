@@ -5,9 +5,6 @@ namespace Tests;
 
 use Github\Client;
 use Migrator\Execute;
-use Monolog\Handler\FirePHPHandler;
-use Monolog\Handler\StreamHandler;
-use Monolog\Logger;
 use PHPUnit\Framework\TestCase;
 
 class ExecuteTest extends TestCase
@@ -17,10 +14,7 @@ class ExecuteTest extends TestCase
 
     public function setUp()
     {
-        $logger = new Logger('debug_logger');
-        $logger->pushHandler(new StreamHandler(__DIR__.'/../debug.log', Logger::DEBUG));
-        $logger->pushHandler(new FirePHPHandler());
-        $this->execute = new Execute(new Client(), $logger);
+        $this->execute = new Execute(new Client());
     }
 
     public function testReadDumpFile()

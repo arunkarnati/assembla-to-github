@@ -5,50 +5,75 @@ namespace Migrator;
 
 use Github\Client;
 use Github\Exception\MissingArgumentException;
+use Monolog\Handler\FirePHPHandler;
+use Monolog\Handler\StreamHandler;
+use Monolog\Logger;
 use Symfony\Component\Dotenv\Dotenv;
-use Psr\Log\LoggerInterface;
 
 class Execute
 {
     /**
-     * Map with assembla milestones as keys and github milestones as values for desktop project.
+     * used to skip the milestone existence check
      */
-    const MILESTONE_MAP = array(
-        3820293  => 6, // Backlog
-        12345924 => 7, // SEO
-        10195553 => 8, // Tech Backlog
-    );
+    const MILESTONE_CHECK_ENABLED = false;
 
-    const SECOND_MILESTONE_MAP = array(
-        3820293  => 6, // Backlog
-        12345924 => 5, // SEO
-        10195553 => 4, // Tech Backlog
-    );
+    /**
+     * Map with assembla milestones as keys and github milestones as values for first project.
+     */
+    const MILESTONE_MAP = [];
 
-    /** @var array - only Highest and lowest gets a label */
+    /**
+     * Map with assembla milestones as keys and github milestones as values for second project.
+     */
+    const SECOND_MILESTONE_MAP = [];
+
+    /**
+     * only the Highest and lowest gets a label in GitHub
+     */
     const PRIORITY_LABEL_MAP = array(
         1 => 'priority:high',
         5 => 'priority:low',
     );
 
-    /** @var array - closed ticket state */
-    const ASSEMBLA_TICKET_STATES = array(
-        391028,     // invalid
-        15864473,   // fixed
-        495710,     // complete
-        24127694,   // duplicate
+    const WORKFLOW_PROPERTY_DEFS = array(
+        579473  => 'Device',
+        1096783 => 'App',
     );
 
-    /** @var string - used to create assembla ticket link added in the GitHub issue description */
-    const ASSEMBLA_WORKSPACE = 'crowd-fusion-tmz';
+    /**
+     * ticket states that are equivalent to CLOSED
+     */
+    const ASSEMBLA_TICKET_STATES = array(
+        10643853,       // complete
+        15864333,       // done - code complete
+        17424963,       // tested
+        8654183,        // invalid
+    );
+
+    /**
+     * used to create a link to the ticket on Assembla
+     */
+    const ASSEMBLA_WORKSPACE = 'tmz-mobile-app';
 
     /** @var string */
-    const DUMP_FILE_NAME = 'dump1.json';
+    public $dumpFileName;
+
+    /** @var string */
+    public $logFileName;
+
+    /** @var string */
+    public $ticketsFileName;
+
+    /** @var string */
+    public $milestonesFileName;
+
+    /** @var string */
+    public $debugLogFileName;
 
     /** @var Client */
     public $client;
 
-    /** @var LoggerInterface */
+    /** @var Logger */
     public $logger;
 
     /** @var array */
@@ -61,36 +86,52 @@ class Execute
     public $commentFields;
 
     /** @var array */
+    public $workflowPropertyValsFields;
+
+    /** @var array */
     public $tickets;
 
-    /** @var array - milestone_id => milestone_title */
+    /** @var array
+     *
+     * milestone_id => milestone_title
+     */
     public $milestones;
 
     /** @var string */
     protected $gitHubUsername;
 
     /** @var string */
-    protected $gitHubDesktopRepo;
+    protected $gitHubIosRepo;
 
     /** @var string */
-    protected $gitHubMobileRepo;
+    protected $gitHubAndroidRepo;
 
     /**
-     * GitHub authentication is done in the constructor.
+     * GitHub authentication is done within the constructor.
      *
-     * @param Client|null     $client
-     * @param LoggerInterface $logger
+     * @param Client|null $client
+     * @param Logger      $logger
      */
-    public function __construct(Client $client = null, LoggerInterface $logger = null)
+    public function __construct(Client $client = null, Logger $logger = null)
     {
         $this->client = $client ?: new Client();
-        $this->logger = $logger;
+        $this->logger = $logger ?: new Logger('debug-logger');
+
         $dotEnv = new Dotenv();
         $dotEnv->load(__DIR__.'/../.env');
+
         $this->client->authenticate(getenv('GH_PERSONAL_ACCESS_TOKEN'), Client::AUTH_HTTP_PASSWORD);
         $this->gitHubUsername = getenv('GH_USERNAME');
-        $this->gitHubDesktopRepo = getenv('GH_REPO');
-        $this->gitHubMobileRepo = getenv('GH_MOBILE_REPO');
+        $this->gitHubIosRepo = getenv('GH_IOS_REPO');
+        $this->gitHubAndroidRepo = getenv('GH_ANDROID_REPO');
+        $this->dumpFileName = getenv('DUMP_FILE_NAME');
+        $this->logFileName = getenv('LOG_FILE_NAME');
+        $this->ticketsFileName = getenv('TICKETS_FILE_NAME');
+        $this->milestonesFileName = getenv('MILESTONES_FILE_NAME');
+        $this->debugLogFileName = getenv('DEBUG_LOG_FILE_NAME');
+
+        $this->logger->pushHandler(new StreamHandler(__DIR__.'/../'.$this->debugLogFileName, Logger::DEBUG));
+        $this->logger->pushHandler(new FirePHPHandler());
     }
 
     /**
@@ -112,27 +153,29 @@ class Execute
      */
     public function readDumpFile()
     {
-        // milestone check for Desktop repo
-        try {
-            $this->checkMilestonesExistOnGitHub($this->gitHubDesktopRepo, Execute::MILESTONE_MAP);
-        } catch (\Exception $e) {
-            return $e->getMessage();
-        }
+        if (Execute::MILESTONE_CHECK_ENABLED) {
+            // milestone check for FIRST repo
+            try {
+                $this->checkMilestonesExistOnGitHub($this->gitHubIosRepo, Execute::MILESTONE_MAP);
+            } catch (\Exception $e) {
+                return $e->getMessage();
+            }
 
-        // milestone check for Mobile repo
-        try {
-            $this->checkMilestonesExistOnGitHub($this->gitHubMobileRepo, Execute::SECOND_MILESTONE_MAP);
-        } catch (\Exception $e) {
-            return $e->getMessage();
+            // milestone check for SECOND repo
+            try {
+                $this->checkMilestonesExistOnGitHub($this->gitHubAndroidRepo, Execute::SECOND_MILESTONE_MAP);
+            } catch (\Exception $e) {
+                return $e->getMessage();
+            }
         }
 
         // exclude tickets that are already created on GitHub
-        $createdTicketData = array_filter(file(__DIR__.'/../log_table.txt'), function ($v) {
+        $createdTicketData = array_filter(file(__DIR__.'/../'.$this->logFileName), function ($v) {
             return $v !== null && $v !== '' && $v !== [] && $v !== "\n";
         });
         $createdTicketNumbers = $this->getCreatedTicketNumbers($createdTicketData);
 
-        $arr = file(__DIR__.'/../'.Execute::DUMP_FILE_NAME);
+        $arr = file(__DIR__.'/../'.$this->dumpFileName);
         foreach ($arr as $value) {
             $parts = explode(',', $value, 2);
             switch ($parts[0]) {
@@ -141,8 +184,9 @@ class Execute
                     break;
                 case 'milestones':
                     $milestone = array_combine($this->milestoneFields, json_decode(trim($parts[1])));
+                    $milestoneMap = Execute::MILESTONE_MAP;
 
-                    if (in_array($milestone['id'], array_keys(Execute::MILESTONE_MAP))) {
+                    if (empty($milestoneMap) || in_array($milestone['id'], array_keys($milestoneMap))) {
                         $this->milestones[$milestone['id']] = $milestone;
                     }
                     break;
@@ -153,11 +197,13 @@ class Execute
                     $ticket = array_combine($this->ticketFields, json_decode(trim($parts[1])));
 
                     // tickets with milestones in the map, without a closed state and is not created yet
-                    if (in_array($ticket['milestone_id'], array_keys(Execute::MILESTONE_MAP))
-                        && !in_array($ticket['ticket_status_id'], Execute::ASSEMBLA_TICKET_STATES)
-                        && !in_array($ticket['number'], $createdTicketNumbers) && $ticket['number'] > 5911) {
+                    if (!in_array($ticket['ticket_status_id'], Execute::ASSEMBLA_TICKET_STATES)) {
                         $ticket['description'] = $this->replaceUrls($ticket['description']);
                         $this->tickets[$ticket['id']] = $ticket;
+
+                        if (isset($ticket['milestone_id'])) {
+                            $this->tickets[$ticket['id']]['milestone'] = $this->milestones[$ticket['milestone_id']]['title'];
+                        }
                     }
                     break;
                 case 'ticket_comments:fields':
@@ -176,11 +222,24 @@ class Execute
                         $this->tickets[$comment['ticket_id']]['comments'][] = $comment;
                     }
                     break;
+                case 'workflow_property_vals:fields':
+                    $this->workflowPropertyValsFields = json_decode(trim($parts[1]));
+                    break;
+                case 'workflow_property_vals':
+                    $val = array_combine($this->workflowPropertyValsFields, json_decode(trim($parts[1])));
+                    $ticketId = $val['workflow_instance_id'];
+                    $propertyId = $val['workflow_property_def_id'];
+                    $workflowPropertyDefs = Execute::WORKFLOW_PROPERTY_DEFS;
+
+                    if (isset($this->tickets[$ticketId]) && in_array($propertyId, array_keys($workflowPropertyDefs))) {
+                        $this->tickets[$ticketId][$workflowPropertyDefs[$propertyId]] = $val['value'];
+                    }
             }
         }
 
-        file_put_contents(__DIR__.'/../tickets.json', isset($this->tickets) ? json_encode($this->tickets) : '');
-        file_put_contents(__DIR__.'/../milestones.json',
+        file_put_contents(__DIR__.'/../'.$this->ticketsFileName,
+            isset($this->tickets) ? json_encode($this->tickets) : '');
+        file_put_contents(__DIR__.'/../'.$this->milestonesFileName,
             isset($this->milestones) ? json_encode($this->milestones) : '');
 
         if ($this->logger) {
@@ -291,16 +350,13 @@ class Execute
         $response = '';
         foreach ($tickets as $ticket) {
             $ticketNumber = $ticket['number'];
-            $this->logger->info('creating '.$ticketNumber);
             $ticketSummary = $ticket['summary'];
             $description = $ticket['description'].'<br /><br />Assembla Ticket Link: https://app.assembla.com/spaces/'.Execute::ASSEMBLA_WORKSPACE.'/tickets/realtime_cardwall?ticket='.$ticketNumber;
-            $repo = $this->gitHubDesktopRepo; // default
-            $milestoneMap = Execute::MILESTONE_MAP; // default
+            $repo = $this->gitHubIosRepo; // default
 
             $ticketParams = [
                 "title"     => $ticketSummary,
                 "body"      => $description,
-                "milestone" => $milestoneMap[$ticket['milestone_id']],
                 "labels"    => [
                     'assembla',
                     strtolower(str_replace(' ', '-', $milestones[$ticket['milestone_id']]['title'])),
@@ -314,6 +370,7 @@ class Execute
 
             try {
                 // step 1 - create issue
+                $this->logger->info('creating '.$ticketNumber.' on GitHub');
                 $response = $this->client->issues()->create($this->gitHubUsername, $repo, $ticketParams);
                 if (isset($response['number'])) {
                     $this->logger->info('created ticket '.$ticketNumber.' on GitHub and the Issue ID is '.$response['number']);

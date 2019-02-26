@@ -11,7 +11,7 @@
 * Copy `.env.dist` file and replace the values ending with `_HERE` with  the actual values.
 * Make sure you have permission to the repo for adding issues.
 
-**Migration process is broken into two steps**
+**Migration process is done into two steps**
 
 **Step 1**
 
