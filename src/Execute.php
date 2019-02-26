@@ -236,6 +236,8 @@ class Execute
                     }
             }
         }
+        $firstRepoCount = $this->setRepoForTickets(); // applicable when the tickets must be split into two repos based on a condition
+        $secondRepoCount = count($this->tickets) - $firstRepoCount;
 
         file_put_contents(__DIR__.'/../'.$this->ticketsFileName,
             isset($this->tickets) ? json_encode($this->tickets) : '');
@@ -244,7 +246,8 @@ class Execute
 
         if ($this->logger) {
             $this->logger->info('Completed: Reading the dump to a file with tickets in JSON format');
-            $this->logger->info('Number of tickets to be imported - '.count($this->tickets));
+            $this->logger->info('Number of tickets to be imported to repo 1 - '.$firstRepoCount);
+            $this->logger->info('Number of tickets to be imported to repo 2 - '.$secondRepoCount);
         }
 
         return true;
@@ -323,6 +326,25 @@ class Execute
         return $text;
     }
 
+    /**
+     * @return int
+     */
+    public function setRepoForTickets()
+    {
+        $counter = 0;
+        foreach ($this->tickets as $ticket) {
+            $this->tickets[$ticket['id']]['repo'] = $this->gitHubAndroidRepo;
+
+            if (strpos($ticket['Device'], 'iOS') > 0 || (!empty($ticket['App']) && strpos($ticket['App'],
+                        'iOS') > 0) || (!empty($ticket['milestone']) && strpos($ticket['milestone'], 'iOS') > 0)) {
+                $this->tickets[$ticket['id']]['repo'] = $this->gitHubIosRepo;
+                $counter = $counter + 1;
+            }
+        }
+
+        return $counter;
+    }
+
     public function getMilestones()
     {
         if (!isset($this->milestones)) {
@@ -341,7 +363,6 @@ class Execute
     public function createIssuesOnGitHub()
     {
         $tickets = json_decode(file_get_contents(__DIR__.'/../tickets.json'), true);
-        $milestones = json_decode(file_get_contents(__DIR__.'/../milestones.json'), true);
 
         if (count($tickets) === 0) {
             return null;
@@ -352,14 +373,14 @@ class Execute
             $ticketNumber = $ticket['number'];
             $ticketSummary = $ticket['summary'];
             $description = $ticket['description'].'<br /><br />Assembla Ticket Link: https://app.assembla.com/spaces/'.Execute::ASSEMBLA_WORKSPACE.'/tickets/realtime_cardwall?ticket='.$ticketNumber;
-            $repo = $this->gitHubIosRepo; // default
+            $repo = $ticket['repo']; // default
 
             $ticketParams = [
-                "title"     => $ticketSummary,
-                "body"      => $description,
-                "labels"    => [
+                "title"  => $ticketSummary,
+                "body"   => $description,
+                "labels" => [
                     'assembla',
-                    strtolower(str_replace(' ', '-', $milestones[$ticket['milestone_id']]['title'])),
+                    strtolower(str_replace(' ', '-', $ticket['milestone'])),
                 ],
             ];
             // if the priority is set and is in the map then add an appropriate priority label to GitHub issue
